@@ -1,0 +1,16 @@
+{
+  "name": "mwi-leaderboards",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev",
+    "scrape": "node scraper/scrape.mjs",
+    "test": "node --test",
+    "db:init": "wrangler d1 execute mwi-leaderboards --remote --file=schema.sql",
+    "deploy": "wrangler pages deploy"
+  },
+  "devDependencies": {
+    "playwright": "1.58.0",
+    "wrangler": "4.131.1"
+  }
+}

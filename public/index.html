@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MWI Leaderboard Tracker</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <style>
@@ -18,7 +18,7 @@
             background: #1a1a2e;
             color: #eee;
             font-family: sans-serif;
-            padding: 24px;
+            padding: 24px 16px;
         }
 
         h1 {
@@ -27,6 +27,7 @@
         }
 
         .controls {
+            flex-wrap: wrap;
             display: flex;
             align-items: center;
             gap: 12px;
@@ -151,7 +152,7 @@
             refreshBtn.disabled = false;
             await loadChart();
 
-            refreshInterval = setInterval(loadChart, 21 * 60 * 1000);
+            refreshInterval = setInterval(loadChart, 15 * 60 * 1000);
         });
 
         // Manual refresh
@@ -188,7 +189,7 @@
             );
             if (top10Check.checked) players = players.slice(0, 10);
 
-            status.textContent = `${players.length} players — last refreshed at ${lastUpdated} (auto-refreshes every 21 min)`;
+            status.textContent = `${players.length} players — last refreshed at ${lastUpdated} (auto-refreshes every 15 min; times in UTC)`;
 
             if (chart) chart.destroy();
             chart = new Chart(document.getElementById('chart'), {
@@ -245,4 +246,4 @@
         }
     </script>
 </body>
-</html>
+</html></html>
