@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>MWI Leaderboard Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: #1a1a2e;
+            color: #eee;
+            font-family: sans-serif;
+            padding: 24px;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            color: #a78bfa;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        select {
+            padding: 8px 12px;
+            background: #2a2a4a;
+            color: #eee;
+            border: 1px solid #4a4a6a;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+            select:disabled {
+                opacity: 0.4;
+            }
+
+        button {
+            padding: 8px 16px;
+            background: #a78bfa;
+            color: #1a1a2e;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+            button:hover {
+                background: #c4b5fd;
+            }
+
+            button:disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+            }
+
+        label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #status {
+            color: #888;
+            font-size: 13px;
+            margin-bottom: 16px;
+            min-height: 18px;
+        }
+
+        #chart-container {
+            position: relative;
+            height: 600px;
+        }
+    </style>
+</head>
+<body>
+    <h1>MWI Leaderboard XP Tracker</h1>
+    <div class="controls">
+        <select id="typeSelect"><option>Loading...</option></select>
+        <select id="categorySelect" disabled><option>-- Select Category --</option></select>
+        <button id="refreshBtn" disabled>↺ Refresh</button>
+        <button id="resetZoomBtn" disabled>⤢ Reset Zoom</button>
+        <label>
+            <input type="checkbox" id="top10Check"> Top 10 only
+        </label>
+    </div>
+    <div id="status"></div>
+    <div id="chart-container">
+        <canvas id="chart"></canvas>
+    </div>
+
+    <script type="module">
+        const COLORS = [
+            "#a78bfa", "#34d399", "#60a5fa", "#f87171", "#fbbf24",
+            "#f472b6", "#4ade80", "#38bdf8", "#fb923c", "#e879f9"
+        ];
+
+        let chart = null;
+        let refreshInterval = null;
+        let lastResponse = null;
+
+        const typeSelect = document.getElementById('typeSelect');
+        const categorySelect = document.getElementById('categorySelect');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const top10Check = document.getElementById('top10Check');
+        const status = document.getElementById('status');
+
+        const resetZoomBtn = document.getElementById('resetZoomBtn');
+
+        resetZoomBtn.addEventListener('click', () => {
+            if (chart) chart.resetZoom();
+        });
+
+        // Load types
+        const types = await(await fetch('/api/types')).json();
+        typeSelect.innerHTML = '<option value="">-- Select Type --</option>';
+        types.forEach(t => typeSelect.append(new Option(t, t)));
+
+        // Type changed → load categories
+        typeSelect.addEventListener('change', async () => {
+            categorySelect.innerHTML = '<option value="">-- Select Category --</option>';
+            categorySelect.disabled = true;
+            refreshBtn.disabled = true;
+            if (refreshInterval) clearInterval(refreshInterval);
+            if (!typeSelect.value) return;
+
+            const cats = await (await fetch(`/api/categories/${typeSelect.value}`)).json();
+            cats.forEach(c => categorySelect.append(new Option(c, c)));
+            categorySelect.disabled = false;
+        });
+
+        // Category changed → load chart + start auto-refresh
+        categorySelect.addEventListener('change', async () => {
+            if (!categorySelect.value) return;
+            if (refreshInterval) clearInterval(refreshInterval);
+
+            refreshBtn.disabled = false;
+            await loadChart();
+
+            refreshInterval = setInterval(loadChart, 21 * 60 * 1000);
+        });
+
+        // Manual refresh
+        refreshBtn.addEventListener('click', loadChart);
+
+        // Checkbox toggles re-render without re-fetching
+        top10Check.addEventListener('change', () => {
+            if (lastResponse) renderChart(lastResponse);
+        });
+
+        async function loadChart() {
+            if (!categorySelect.value) return;
+
+            refreshBtn.disabled = true;
+            status.textContent = 'Loading...';
+
+            try {
+                lastResponse = await (await fetch(`/api/xp/${typeSelect.value}/${categorySelect.value}`)).json();
+                renderChart(lastResponse);
+            } catch (e) {
+                status.textContent = 'Failed to load data. Will retry at next interval.';
+            } finally {
+                refreshBtn.disabled = false;
+            }
+        }
+
+        function renderChart(response) {
+            resetZoomBtn.disabled = false;
+            const lastUpdated = new Date().toLocaleTimeString();
+
+            // Sort players by total XP gained, optionally take top 10
+            let players = [...response.players].sort((a, b) =>
+                b.data.reduce((s, d) => s + d.y, 0) - a.data.reduce((s, d) => s + d.y, 0)
+            );
+            if (top10Check.checked) players = players.slice(0, 10);
+
+            status.textContent = `${players.length} players — last refreshed at ${lastUpdated} (auto-refreshes every 21 min)`;
+
+            if (chart) chart.destroy();
+            chart = new Chart(document.getElementById('chart'), {
+                type: 'line',
+                data: {
+                    labels: response.labels,
+                    datasets: players.map((p, i) => ({
+                        label: p.name,
+                        data: response.labels.map(label => {
+                            const point = p.data.find(d => d.x === label);
+                            return point ? point.y : null;
+                        }),
+                        borderColor: COLORS[i % COLORS.length],
+                        backgroundColor: 'transparent',
+                        pointRadius: 3,
+                        tension: 0.1,
+                        spanGaps: false
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            ticks: { color: '#aaa', maxRotation: 45 },
+                            grid: { color: '#2a2a4a' },
+                            title: { display: true, text: 'Snapshot Time', color: '#aaa' }
+                        },
+                        y: {
+                            ticks: { color: '#aaa' },
+                            grid: { color: '#2a2a4a' },
+                            title: { display: true, text: 'XP Gained', color: '#aaa' }
+                        }
+                    },
+                    plugins: {
+                          zoom: {
+                            zoom: {
+                              wheel: { enabled: true },       // scroll to zoom
+                              pinch: { enabled: true },        // pinch on mobile
+                              mode: 'x'                        // only zoom X axis
+                            },
+                            pan: {
+                              enabled: true,
+                              mode: 'x'                        // only pan X axis
+                            }
+                          },
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#eee', boxWidth: 12 }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>

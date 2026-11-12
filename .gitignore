@@ -1,0 +1,8 @@
+secrets.json
+.dev.vars
+bin/
+obj/
+.vs/
+*.csproj.user
+node_modules/
+.wrangler/
