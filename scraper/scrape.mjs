@@ -82,7 +82,7 @@ function fetchLeaderboard({ wsUrl, type, category }) {
       else if (msg.type === 'get_leaderboard' || msg.type === 'leaderboard_updated') {
         clearTimeout(timer);
         ws.close();
-        resolve((msg.leaderboard?.rows ?? []).map(r => ({ rank: r.rank, name: r.name, value1: r.value1 ?? 0, value2: r.value2 ?? 0 })));
+        resolve((msg.leaderboard?.rows ?? []).map(r => [r.name, r.value2 ?? 0])); // [name, total XP], in rank order
       }
     };
     ws.onerror = () => { clearTimeout(timer); reject(new Error('WebSocket error')); };

@@ -4,8 +4,10 @@
 //   GET  /api/xp/:type/:category?days=7
 //   POST /api/ingest   (Authorization: Bearer <INGEST_TOKEN>), called by the scraper
 
-const MAX_GAP_MINUTES = 150; // deltas across longer gaps (missed runs) are dropped
-const RETENTION_DAYS = 90;
+const RETENTION_DAYS = 30;
+const FULL_DETAIL_DAYS = 3;  // older snapshots are thinned to one per hour to fit D1's free 500 MB
+const POINTS_PER_CHART = 144; // every range is bucketed to about this many snapshots (24h at 10 min)
+const MIN_GAP_MS = 45 * 60000; // gains across longer gaps (missed runs) are dropped
 
 export async function onRequest({ request, env, params }) {
   const [route, a, b] = params.route ?? [];
@@ -40,45 +42,56 @@ async function categories(db, type) {
   return results.map(r => r.category);
 }
 
-// XP gained per player between consecutive snapshots (same rules as the old SQL Server LAG query).
+// XP gained per player between consecutive snapshots. XP totals are cumulative, so longer ranges
+// just read fewer snapshots (the last one in each time bucket) instead of every 10-minute scrape.
 export async function xp(db, type, category, days) {
   const since = new Date(Date.now() - days * 86400_000).toISOString();
-  const { results } = await db
-    .prepare(`SELECT fetched_at, rows FROM snapshots WHERE type = ? AND category = ? AND fetched_at >= ? ORDER BY fetched_at`)
-    .bind(type, category, since).all();
-  return computeXp(results);
+  const bucketSeconds = Math.round(days * 86400 / POINTS_PER_CHART);
+  const [snapshots, latest] = await db.batch([
+    db.prepare(`SELECT MAX(fetched_at) AS fetched_at, rows FROM snapshots
+                WHERE type = ? AND category = ? AND fetched_at >= ?
+                GROUP BY CAST(strftime('%s', fetched_at) / ? AS INTEGER) ORDER BY fetched_at`)
+      .bind(type, category, since, bucketSeconds),
+    db.prepare(`SELECT MAX(fetched_at) AS latest FROM snapshots WHERE type = ? AND category = ?`).bind(type, category),
+  ]);
+  return { latest: latest.results[0]?.latest ?? null, ...computeXp(snapshots.results, Math.max(MIN_GAP_MS, bucketSeconds * 2500)) };
 }
 
-export function computeXp(snapshots) {
-  const prev = new Map(); // name -> { value2, t }
+// snapshots: [{ fetched_at, rows: JSON [[name, totalXp], ...] }] oldest first.
+export function computeXp(snapshots, maxGapMs = MIN_GAP_MS) {
+  const prev = new Map(); // name -> { xp, t }
   const points = [];
+  const elapsed = new Map(); // snapshot time -> ms since the snapshot before it
+  let prevT = null;
   for (const snap of snapshots) {
     const t = Date.parse(snap.fetched_at);
-    for (const row of JSON.parse(snap.rows)) {
-      const p = prev.get(row.name);
-      if (p) {
-        const gained = row.value2 - p.value2;
-        if (gained >= 0 && (t - p.t) / 60000 <= MAX_GAP_MINUTES) points.push({ name: row.name, t, y: gained });
-      }
-      prev.set(row.name, { value2: row.value2, t });
+    if (prevT !== null) elapsed.set(t, t - prevT);
+    prevT = t;
+    for (const [name, total] of JSON.parse(snap.rows)) {
+      const p = prev.get(name);
+      if (p && total >= p.xp && t - p.t <= maxGapMs) points.push({ name, t, y: total - p.xp });
+      prev.set(name, { xp: total, t });
     }
   }
 
   // Only keep snapshots where someone actually gained XP (skips stale/duplicate game data).
-  const valid = new Set(points.filter(p => p.y > 0).map(p => p.t));
-  const players = new Map();
+  const times = [...new Set(points.filter(p => p.y > 0).map(p => p.t))].sort((x, y) => x - y);
+  const index = new Map(times.map((t, i) => [t, i]));
+  const players = new Map(); // name -> { name, total, data: XP gained at each timestamp, null where unknown }
   for (const p of points) {
-    if (!valid.has(p.t)) continue;
-    if (!players.has(p.name)) players.set(p.name, []);
-    players.get(p.name).push({ x: label(p.t), y: p.y });
+    const i = index.get(p.t);
+    if (i === undefined) continue;
+    if (!players.has(p.name)) players.set(p.name, { name: p.name, total: 0, data: Array(times.length).fill(null) });
+    const player = players.get(p.name);
+    player.data[i] = p.y;
+    player.total += p.y;
   }
   return {
-    labels: [...valid].sort((x, y) => x - y).map(label),
-    players: [...players].map(([name, data]) => ({ name, data })),
+    timestamps: times.map(t => new Date(t).toISOString()),
+    hours: times.map(t => elapsed.get(t) / 3600_000), // time each gain was earned over, for XP/hour
+    players: [...players.values()].sort((x, y) => y.total - x.total),
   };
 }
-
-const label = t => new Date(t).toISOString().replace(/^\d{4}-(\d\d)-(\d\d)T(\d\d:\d\d).*/, '$1/$2 $3'); // "MM/dd HH:mm" UTC
 
 async function ingest(request, env) {
   if (!env.INGEST_TOKEN || !(await tokenMatches(request.headers.get('Authorization') ?? '', `Bearer ${env.INGEST_TOKEN}`)))
@@ -99,12 +112,17 @@ async function ingest(request, env) {
   }
 
   const at = new Date(fetchedAt).toISOString();
-  const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400_000).toISOString();
+  const ago = ms => new Date(Date.now() - ms).toISOString();
+  const thinTo = ago(FULL_DETAIL_DAYS * 86400_000), thinFrom = ago(FULL_DETAIL_DAYS * 86400_000 + 6 * 3600_000);
   await env.DB.batch([
     ...boards.map(bd => env.DB
       .prepare(`INSERT OR REPLACE INTO snapshots (type, category, fetched_at, rows) VALUES (?, ?, ?, ?)`)
       .bind(bd.type, bd.category, at, JSON.stringify(bd.rows))),
-    env.DB.prepare(`DELETE FROM snapshots WHERE fetched_at < ?`).bind(cutoff),
+    env.DB.prepare(`DELETE FROM snapshots WHERE fetched_at < ?`).bind(ago(RETENTION_DAYS * 86400_000)),
+    // Thin the slice that just aged past full detail: keep the first run of each hour (substr = "YYYY-MM-DDTHH").
+    env.DB.prepare(`DELETE FROM snapshots WHERE fetched_at >= ?1 AND fetched_at < ?2 AND fetched_at NOT IN
+                    (SELECT MIN(fetched_at) FROM snapshots WHERE fetched_at >= ?1 AND fetched_at < ?2 GROUP BY substr(fetched_at, 1, 13))`)
+      .bind(thinFrom, thinTo),
   ]);
   return json({ saved: boards.length });
 }

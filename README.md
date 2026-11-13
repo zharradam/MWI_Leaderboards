@@ -3,7 +3,7 @@
 Tracks XP gained per player on Milky Way Idle leaderboards and charts it.
 
 ```
-GitHub Actions (hourly)              Cloudflare Pages (pages.dev)
+GitHub Actions (10 min)             Cloudflare Pages (pages.dev)
 scraper/scrape.mjs  --POST-->  functions/api/[[route]].js  <-->  D1 (schema.sql)
  headless Chromium               /api/types, /categories, /xp       |
  + game WebSocket                public/index.html  <---------------+

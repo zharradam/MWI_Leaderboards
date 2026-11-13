@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
   type       TEXT NOT NULL,
   category   TEXT NOT NULL,
   fetched_at TEXT NOT NULL, -- ISO 8601 UTC
-  rows       TEXT NOT NULL, -- JSON: [{ rank, name, value1, value2 }]
+  rows       TEXT NOT NULL, -- JSON: [[name, totalXp], ...] in rank order
   PRIMARY KEY (type, category, fetched_at)
 ) WITHOUT ROWID;
 

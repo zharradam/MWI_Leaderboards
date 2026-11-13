@@ -2,7 +2,7 @@ name: Scrape leaderboards
 
 on:
   schedule:
-    - cron: "7 * * * *" # hourly; private-repo Actions minutes (2,000/mo) don't allow much more
+    - cron: "*/10 * * * *" # free on a public repo; GitHub often starts scheduled runs a few minutes late
   workflow_dispatch:
 
 concurrency: scrape
