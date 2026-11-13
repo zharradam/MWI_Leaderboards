@@ -4,13 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler pages dev",
-    "scrape": "node scraper/scrape.mjs",
     "test": "node --test",
     "db:init": "wrangler d1 execute mwi-leaderboards --remote --file=schema.sql",
-    "deploy": "wrangler pages deploy"
+    "deploy": "wrangler pages deploy",
+    "deploy:scraper": "wrangler deploy --config scraper/wrangler.toml"
   },
   "devDependencies": {
-    "playwright": "1.58.0",
     "wrangler": "4.131.1"
   }
 }

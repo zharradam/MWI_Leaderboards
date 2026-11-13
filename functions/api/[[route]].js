@@ -1,18 +1,16 @@
 // Cloudflare Pages Function handling every /api/* route. env.DB is the D1 binding.
-//   GET  /api/types
-//   GET  /api/categories/:type
-//   GET  /api/xp/:type/:category?days=7
-//   POST /api/ingest   (Authorization: Bearer <INGEST_TOKEN>), called by the scraper
+//   GET /api/types
+//   GET /api/categories/:type
+//   GET /api/xp/:type/:category?days=7
+// Read-only: snapshots are written by the cron Worker in scraper/.
 
-const RETENTION_DAYS = 30;
-const FULL_DETAIL_DAYS = 3;  // older snapshots are thinned to one per hour to fit D1's free 500 MB
+const RETENTION_DAYS = 30; // the scraper deletes anything older
 const POINTS_PER_CHART = 144; // every range is bucketed to about this many snapshots (24h at 10 min)
 const MIN_GAP_MS = 45 * 60000; // gains across longer gaps (missed runs) are dropped
 
 export async function onRequest({ request, env, params, waitUntil }) {
   const [route, a, b] = params.route ?? [];
   try {
-    if (request.method === 'POST' && route === 'ingest') return await ingest(request, env);
     if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
     if (route === 'types' && !a) return json(await types(env.DB));
     if (route === 'categories' && a && !b) return json(await categories(env.DB, a));
@@ -99,44 +97,4 @@ export function computeXp(snapshots, maxGapMs = MIN_GAP_MS) {
     hours: times.map(t => elapsed.get(t) / 3600_000), // time each gain was earned over, for XP/hour
     players: [...players.values()].sort((x, y) => y.total - x.total),
   };
-}
-
-async function ingest(request, env) {
-  if (!env.INGEST_TOKEN || !(await tokenMatches(request.headers.get('Authorization') ?? '', `Bearer ${env.INGEST_TOKEN}`)))
-    return json({ error: 'Unauthorized' }, 401);
-
-  const { fetchedAt, boards } = await request.json();
-  if (isNaN(Date.parse(fetchedAt)) || !Array.isArray(boards) || !boards.length) return json({ error: 'Bad payload' }, 400);
-  for (const bd of boards)
-    if (typeof bd.type !== 'string' || typeof bd.category !== 'string' || !Array.isArray(bd.rows)) return json({ error: 'Bad board' }, 400);
-
-  // The game only refreshes leaderboards periodically; skip the run if the reference board hasn't changed.
-  const ref = boards.find(bd => bd.type === 'standard' && bd.category === 'total_level');
-  if (ref) {
-    const last = await env.DB
-      .prepare(`SELECT rows FROM snapshots WHERE type = 'standard' AND category = 'total_level' ORDER BY fetched_at DESC LIMIT 1`)
-      .first('rows');
-    if (last === JSON.stringify(ref.rows)) return json({ skipped: true });
-  }
-
-  const at = new Date(fetchedAt).toISOString();
-  const ago = ms => new Date(Date.now() - ms).toISOString();
-  const thinTo = ago(FULL_DETAIL_DAYS * 86400_000), thinFrom = ago(FULL_DETAIL_DAYS * 86400_000 + 6 * 3600_000);
-  await env.DB.batch([
-    ...boards.map(bd => env.DB
-      .prepare(`INSERT OR REPLACE INTO snapshots (type, category, fetched_at, rows) VALUES (?, ?, ?, ?)`)
-      .bind(bd.type, bd.category, at, JSON.stringify(bd.rows))),
-    env.DB.prepare(`DELETE FROM snapshots WHERE fetched_at < ?`).bind(ago(RETENTION_DAYS * 86400_000)),
-    // Thin the slice that just aged past full detail: keep the first run of each hour (substr = "YYYY-MM-DDTHH").
-    env.DB.prepare(`DELETE FROM snapshots WHERE fetched_at >= ?1 AND fetched_at < ?2 AND fetched_at NOT IN
-                    (SELECT MIN(fetched_at) FROM snapshots WHERE fetched_at >= ?1 AND fetched_at < ?2 GROUP BY substr(fetched_at, 1, 13))`)
-      .bind(thinFrom, thinTo),
-  ]);
-  return json({ saved: boards.length });
-}
-
-async function tokenMatches(given, expected) {
-  const enc = new TextEncoder();
-  const [a, b] = await Promise.all([given, expected].map(s => crypto.subtle.digest('SHA-256', enc.encode(s))));
-  return crypto.subtle.timingSafeEqual(a, b);
 }

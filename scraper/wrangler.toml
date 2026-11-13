@@ -1,0 +1,15 @@
+name = "mwi-scraper"
+main = "index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false # cron only, no public URL
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mwi-leaderboards"
+database_id = "bdef81ab-d7a9-46a8-8e3a-985c788509f7"
