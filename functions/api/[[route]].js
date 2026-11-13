@@ -9,7 +9,7 @@ const FULL_DETAIL_DAYS = 3;  // older snapshots are thinned to one per hour to f
 const POINTS_PER_CHART = 144; // every range is bucketed to about this many snapshots (24h at 10 min)
 const MIN_GAP_MS = 45 * 60000; // gains across longer gaps (missed runs) are dropped
 
-export async function onRequest({ request, env, params }) {
+export async function onRequest({ request, env, params, waitUntil }) {
   const [route, a, b] = params.route ?? [];
   try {
     if (request.method === 'POST' && route === 'ingest') return await ingest(request, env);
@@ -18,15 +18,23 @@ export async function onRequest({ request, env, params }) {
     if (route === 'categories' && a && !b) return json(await categories(env.DB, a));
     if (route === 'xp' && a && b) {
       const days = Math.min(Math.max(Number(new URL(request.url).searchParams.get('days')) || 7, 1), RETENTION_DAYS);
-      return json(await xp(env.DB, a, b, days));
+      // Cached for a minute under a canonical URL, so repeated or junk-parameter requests can't burn D1's free daily reads.
+      const key = new Request(new URL(`/api/xp/${encodeURIComponent(a)}/${encodeURIComponent(b)}?days=${days}`, request.url));
+      let res = await caches.default.match(key);
+      if (!res) {
+        res = json(await xp(env.DB, a, b, days), 200, { 'Cache-Control': 'public, max-age=60' });
+        waitUntil(caches.default.put(key, res.clone()));
+      }
+      return res;
     }
     return json({ error: 'Not found' }, 404);
   } catch (e) {
-    return json({ error: e.message }, 500);
+    console.error(e);
+    return json({ error: 'Internal error' }, 500);
   }
 }
 
-const json = (body, status = 200) => Response.json(body, { status });
+const json = (body, status = 200, headers) => Response.json(body, { status, headers });
 
 const LATEST = `fetched_at = (SELECT MAX(fetched_at) FROM snapshots)`;
 
