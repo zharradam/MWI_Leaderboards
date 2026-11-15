@@ -1,11 +1,13 @@
 # MWI Leaderboards
 
 Tracks XP gained per player on Milky Way Idle leaderboards and charts it. Everything runs on Cloudflare's free plan.
+A Market tab lists the +0 order books of items trading at 50M or more, read once an hour at half past, to show what
+people are crafting for XP.
 
 ```
-Cloudflare Worker (cron, 10 min)          Cloudflare Pages (pages.dev)
+Cloudflare Worker (cron, 1 min)           Cloudflare Pages (pages.dev)
 scraper/index.js  ----writes---->  D1  <----reads----  functions/api/[[route]].js
- game WebSocket               (schema.sql)             /api/types, /categories, /xp
+ game WebSocket               (schema.sql)             /api/types, /categories, /xp, /market
                                                        public/index.html
 ```
 

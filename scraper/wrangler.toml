@@ -4,7 +4,7 @@ compatibility_date = "2026-09-01"
 workers_dev = false # cron only, no public URL
 
 [triggers]
-crons = ["*/10 * * * *"]
+crons = ["* * * * *"]
 
 [observability]
 enabled = true

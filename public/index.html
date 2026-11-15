@@ -88,7 +88,8 @@
         /* Tome paints the page dark and expects content on a parchment sheet. */
         :root[data-look="tome"] main { background: var(--ground); }
 
-        main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
+        main { display: grid; min-height: 0; }
+        #xp-panel { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 
         #chart-area { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 14px; min-width: 0; min-height: 0; padding: 14px 16px 10px 20px; }
         .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
@@ -144,6 +145,41 @@
         .total { font-size: 12px; }
         .no-match { padding: 12px; color: var(--ink-soft); }
 
+        /* View tabs. The selected one gets an underline, not just colour, and nothing that changes its size. */
+        .tabs { display: flex; gap: 4px; overflow-x: auto; }
+        .tabs button {
+            position: relative; flex: none; padding: 6px 10px; cursor: pointer;
+            font: inherit; font-weight: 600; color: var(--ink-soft); background: none; border: 0; border-radius: var(--r);
+        }
+        .tabs button:hover { color: var(--ink); background: var(--sunk); }
+        .tabs [aria-selected="true"] { color: var(--cf-accent-ink); }
+        .tabs [aria-selected="true"]::after { content: ""; position: absolute; inset: auto 6px 0; border-block-end: 3px solid var(--accent); }
+
+        #market-panel { min-height: 0; overflow-y: auto; }
+        .market { display: grid; gap: 12px; padding: 14px 20px 24px; }
+        .market-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; color: var(--ink-soft); }
+        .table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); }
+        #marketTable { width: 100%; min-inline-size: 680px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+        #marketTable caption { padding: 10px 12px; text-align: left; font-weight: 600; }
+        #marketTable th, #marketTable td { padding: 7px 12px; text-align: right; border-top: 1px solid var(--rule); white-space: nowrap; }
+        #marketTable :is(th, td):first-child { text-align: left; }
+        #marketTable th { color: var(--ink-soft); font-weight: 600; font-size: 13px; }
+        #marketTable th:has(> button) { padding: 0; }
+        #marketTable th button {
+            display: inline-flex; align-items: center; gap: 4px; width: 100%; min-height: 32px; padding: 7px 12px;
+            font: inherit; color: inherit; background: none; border: 0; cursor: pointer;
+        }
+        #marketTable th:not(:first-child) button { justify-content: flex-end; }
+        #marketTable th button:hover { color: var(--ink); }
+        #marketTable th button::after { content: "\2195"; opacity: 0.35; }
+        #marketTable th[aria-sort="ascending"] button::after { content: "\2191"; opacity: 1; }
+        #marketTable th[aria-sort="descending"] button::after { content: "\2193"; opacity: 1; }
+        #marketTable tbody tr:hover { background: var(--sunk); }
+        .up { color: var(--win); }
+        .down { color: var(--caution); }
+        .faint { color: var(--ink-faint); }
+        .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
         @media (max-width: 820px) {
             body { display: block; height: auto; }
             header { padding: 12px 16px; }
@@ -154,7 +190,8 @@
             .f { flex: 1 1 140px; }
             .f select { flex: 1; min-width: 0; }
             #viewPicker { margin-left: 0; }
-            main { display: block; }
+            main, #xp-panel { display: block; }
+            .market { padding: 12px 16px 20px; }
             #chart-area { height: 68vh; min-height: 380px; padding: 12px 12px 8px; }
             aside { border-left: 0; border-top: 1px solid var(--rule); }
             #players { max-height: 70vh; }
@@ -179,11 +216,16 @@
             </svg>
             <h1>MWI XP Tracker</h1>
         </div>
+        <div class="tabs" focusgroup="tablist nomemory" role="tablist" aria-label="Views">
+            <button type="button" role="tab" id="xpTab" aria-selected="true" focusgroupstart>XP</button>
+            <button type="button" role="tab" id="marketTab" aria-selected="false">Market 50M+</button>
+        </div>
         <div id="status" role="status"></div>
         <!-- looks.js appends the Look picker and the light/dark button here -->
     </header>
 
     <main>
+      <div id="xp-panel" role="tabpanel" aria-labelledby="xpTab">
         <section id="chart-area" aria-label="XP chart">
             <div class="toolbar">
                 <label class="f">Board
@@ -224,6 +266,35 @@
             </div>
             <ul id="players"></ul>
         </aside>
+      </div>
+
+      <div id="market-panel" role="tabpanel" aria-labelledby="marketTab" hidden>
+        <div class="market">
+            <div class="market-head">
+                <p>What's listed for sale at +0, for items trading at 50M or more. Listings that climb usually mean people are crafting that item for XP.</p>
+                <span id="marketTime"></span>
+            </div>
+            <div class="table-scroll" role="region" aria-labelledby="marketCaption" tabindex="0">
+                <table id="marketTable">
+                    <caption id="marketCaption">+0 order books, read hourly</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col"><button type="button" commandfor="marketTable" command="--sort">Item</button></th>
+                            <th scope="col" data-type="number" aria-sort="descending"><button type="button" commandfor="marketTable" command="--sort">Listed</button></th>
+                            <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">24h change</button></th>
+                            <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">7d change</button></th>
+                            <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Best ask</button></th>
+                            <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Wanted</button></th>
+                            <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Best bid</button></th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <p id="marketMessage" hidden></p>
+            <div class="sr-only" role="status" id="sortStatus"></div>
+        </div>
+      </div>
     </main>
 
     <script type="module">
@@ -233,7 +304,7 @@
             light: ["#4a3aa7", "#1baf7a", "#2a78d6", "#eb6834", "#c98500", "#d55181", "#0b9bb0", "#e34948", "#5b8f1d", "#8a7a5c"],
         };
         const REFRESH_MS = 10 * 60 * 1000;
-        const LATE_MIN = 25, DOWN_MIN = 60; // the scraper runs every 10 minutes, often a few late: amber past 25, red past an hour
+        const LATE_MIN = 25, DOWN_MIN = 60; // new data lands whenever the game refreshes its boards: amber past 25 minutes, red past an hour
         const SMOOTH = 5;                // XP per hour is averaged over this many points
 
         const $ = id => document.getElementById(id);
@@ -287,7 +358,7 @@
 
         // State lives in the URL hash (#type/category/days/view) so a view can be bookmarked.
         const [hashType, hashCategory, hashDays, hashView] = location.hash.slice(1).split('/');
-        const saveHash = () => history.replaceState(null, '', `#${typeSelect.value}/${categorySelect.value}/${picked(rangePicker)}/${picked(viewPicker)}`);
+        const saveHash = () => onMarket() || history.replaceState(null, '', `#${typeSelect.value}/${categorySelect.value}/${picked(rangePicker)}/${picked(viewPicker)}`);
         pick(rangePicker, hashDays || 3);
         pick(viewPicker, hashView || 'total');
 
@@ -569,6 +640,80 @@
         $('clearBtn').addEventListener('click', () => { selected.clear(); renderPlayers(); renderChart(); });
         resetZoomBtn.addEventListener('click', () => { chart.resetZoom(); resetZoomBtn.hidden = true; });
 
+        // Market tab: +0 order books of expensive items, from /api/market.
+        const xpTab = $('xpTab'), marketTab = $('marketTab'), marketTable = $('marketTable');
+        const marketBody = marketTable.tBodies[0];
+        function onMarket() { return marketTab.ariaSelected === 'true'; }
+        let marketLoaded = false;
+
+        function selectTab(tab) {
+            for (const t of [xpTab, marketTab]) {
+                t.ariaSelected = t === tab;
+                t.toggleAttribute('focusgroupstart', t === tab);
+            }
+            $('xp-panel').hidden = tab !== xpTab;
+            $('market-panel').hidden = tab !== marketTab;
+            if (tab === marketTab) {
+                history.replaceState(null, '', '#market');
+                if (!marketLoaded) { marketLoaded = true; loadMarket(); setInterval(loadMarket, REFRESH_MS); }
+            } else if (data) { saveHash(); renderChart(); } // a chart drawn while hidden has no size
+        }
+        xpTab.addEventListener('click', () => selectTab(xpTab));
+        marketTab.addEventListener('click', () => selectTab(marketTab));
+
+        const signed = new Intl.NumberFormat(undefined, { signDisplay: 'exceptZero', maximumFractionDigits: 0 });
+        async function loadMarket() {
+            const note = $('marketMessage');
+            let m;
+            try { m = await api('/api/market'); }
+            catch (e) { note.textContent = `Couldn't load the market: ${e.message}`; note.hidden = false; return; }
+            note.hidden = m.items.length > 0;
+            note.textContent = 'No market data yet. The scraper reads the market once an hour, at half past.';
+            $('marketTime').textContent = m.latest ? `Read ${fullTime.format(new Date(m.latest))}` : '';
+
+            const cell = (text, value, cls) => {
+                const td = document.createElement('td');
+                td.textContent = text;
+                if (value !== undefined) td.dataset.value = value;
+                if (cls) td.className = cls;
+                return td;
+            };
+            const price = p => (p < 0 ? cell('none', -1, 'faint') : cell(compact.format(p), p));
+            // Unknown changes sort below every real one.
+            const change = c => (c === null ? cell('–', -Infinity, 'faint') : cell(signed.format(c), c, c > 0 ? 'up' : c < 0 ? 'down' : ''));
+            marketBody.replaceChildren(...m.items.map(i => {
+                const tr = document.createElement('tr');
+                const name = cell(pretty(i.item.split('/').pop()));
+                name.title = i.item;
+                tr.append(name, cell(full.format(i.listed), i.listed), change(i.day), change(i.week),
+                    price(i.ask), cell(full.format(i.wanted), i.wanted), price(i.bid));
+                return tr;
+            }));
+            const th = marketTable.querySelector('th[aria-sort]');
+            sortMarket(th, th.getAttribute('aria-sort'));
+        }
+
+        const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+        function sortMarket(th, direction) {
+            for (const h of marketTable.tHead.rows[0].cells) h.removeAttribute('aria-sort');
+            th.setAttribute('aria-sort', direction);
+            const factor = direction === 'ascending' ? 1 : -1, i = th.cellIndex;
+            const value = row => row.cells[i].dataset.value ?? row.cells[i].textContent.trim();
+            const rows = [...marketBody.rows].sort((a, b) =>
+                factor * (th.dataset.type === 'number' ? value(a) - value(b) : collator.compare(value(a), value(b))));
+            // Move the existing rows rather than rebuilding them; moveBefore keeps focus where supported.
+            for (const row of rows) marketBody.moveBefore ? marketBody.moveBefore(row, null) : marketBody.append(row);
+            return rows.length;
+        }
+        marketTable.addEventListener('command', e => {
+            if (e.command !== '--sort') return;
+            const th = e.source.closest('th');
+            const direction = th.getAttribute('aria-sort') === 'ascending' ? 'descending' : 'ascending';
+            const n = sortMarket(th, direction);
+            $('sortStatus').textContent = `Sorted by ${e.source.textContent.trim()}, ${direction}, ${n} rows`;
+        });
+
+        if (hashType === 'market') selectTab(marketTab);
         init();
     </script>
 </body>

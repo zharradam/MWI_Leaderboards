@@ -9,3 +9,9 @@ CREATE TABLE IF NOT EXISTS snapshots (
 ) WITHOUT ROWID;
 
 CREATE INDEX IF NOT EXISTS snapshots_fetched_at ON snapshots (fetched_at);
+
+-- One row per hourly market read: the +0 order book totals of every item trading at 50M or more.
+CREATE TABLE IF NOT EXISTS market (
+  fetched_at TEXT PRIMARY KEY, -- ISO 8601 UTC
+  rows       TEXT NOT NULL     -- JSON: [[itemHrid, listedQty, bestAsk, wantedQty, bestBid], ...]
+) WITHOUT ROWID;

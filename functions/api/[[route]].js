@@ -2,6 +2,7 @@
 //   GET /api/types
 //   GET /api/categories/:type
 //   GET /api/xp/:type/:category?days=7
+//   GET /api/market
 // Read-only: snapshots are written by the cron Worker in scraper/.
 
 const RETENTION_DAYS = 30; // the scraper deletes anything older
@@ -14,6 +15,7 @@ export async function onRequest({ request, env, params, waitUntil }) {
     if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
     if (route === 'types' && !a) return json(await types(env.DB));
     if (route === 'categories' && a && !b) return json(await categories(env.DB, a));
+    if (route === 'market' && !a) return json(await market(env.DB), 200, { 'Cache-Control': 'public, max-age=300' });
     if (route === 'xp' && a && b) {
       const days = Math.min(Math.max(Number(new URL(request.url).searchParams.get('days')) || 7, 1), RETENTION_DAYS);
       // Cached for a minute under a canonical URL, so repeated or junk-parameter requests can't burn D1's free daily reads.
@@ -96,5 +98,29 @@ export function computeXp(snapshots, maxGapMs = MIN_GAP_MS) {
     timestamps: times.map(t => new Date(t).toISOString()),
     hours: times.map(t => elapsed.get(t) / 3600_000), // time each gain was earned over, for XP/hour
     players: [...players.values()].sort((x, y) => y.total - x.total),
+  };
+}
+
+// Latest +0 order book totals for expensive items, with how the listed quantity changed over 24 hours and 7 days.
+async function market(db) {
+  const at = days => new Date(Date.now() - days * 86400_000).toISOString();
+  const before = `SELECT fetched_at, rows FROM market WHERE fetched_at <= ? ORDER BY fetched_at DESC LIMIT 1`;
+  const [latest, day, week] = await db.batch([
+    db.prepare(before).bind(at(0)), db.prepare(before).bind(at(1)), db.prepare(before).bind(at(7)),
+  ]);
+  return computeMarket(latest.results[0], day.results[0], week.results[0]);
+}
+
+// Each snapshot: { fetched_at, rows: JSON [[itemHrid, listedQty, bestAsk, wantedQty, bestBid], ...] } or undefined.
+// Changes are null when the older snapshot is missing or didn't list the item.
+export function computeMarket(latest, dayAgo, weekAgo) {
+  if (!latest) return { latest: null, items: [] };
+  const listed = snap => new Map(snap ? JSON.parse(snap.rows).map(r => [r[0], r[1]]) : []);
+  const day = listed(dayAgo), week = listed(weekAgo);
+  const change = (then, item, qty) => (then.has(item) ? qty - then.get(item) : null);
+  return {
+    latest: latest.fetched_at,
+    items: JSON.parse(latest.rows).map(([item, listed, ask, wanted, bid]) =>
+      ({ item, listed, ask, wanted, bid, day: change(day, item, listed), week: change(week, item, listed) })),
   };
 }
