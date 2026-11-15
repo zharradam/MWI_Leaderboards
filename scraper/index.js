@@ -5,6 +5,8 @@
 // Once an hour it instead reads the market's +0 order books for expensive items (see saveMarket).
 // Secrets: MWI_ACCESS_TOKEN, MWI_HASH, MWI_CHARACTER_ID, MWI_GAME_VERSION, MWI_VERSION_TIMESTAMP.
 
+import recipes from './recipes.json' with { type: 'json' }; // from update-recipes.mjs
+
 const TYPES = ['standard', 'ironcow'];
 // Also available: task_points, labyrinth_points, labyrinth_depth, collection_points,
 // bestiary_points, fame_points, guild (and types legacy_ironcow, steam_standard, steam_ironcow, guild).
@@ -21,6 +23,7 @@ const FULL_DETAIL_DAYS = 3; // older snapshots are thinned to one per hour to fi
 const MARKET_MINUTE = 30; // once an hour this run reads market order books instead of leaderboards;
 const MARKET_MINUTES = 3; // it takes up to this long (about a second per item), so the runs after it do nothing
 const MARKET_MIN_PRICE = 50_000_000; // only +0 items whose best ask or bid is at least this
+const ARTISAN = 1 - 0.1 * 1.1; // Artisan Tea's 10% fewer inputs, 10% better with a Guzzling Pouch; not the upgrade item
 
 export default {
   async scheduled(event, env) {
@@ -96,9 +99,9 @@ async function askGame(env, requests, replyTypes, onReply, timeoutMs, paceMs) {
 }
 
 // Lists the +0 order book of every item trading at MARKET_MIN_PRICE or more, as one row per run:
-// rows = JSON [[itemHrid, listedQty, bestAsk, wantedQty, bestBid, avgPrice, volume, pricesAt], ...]. Prices are -1
-// when there are no orders or trades. avgPrice and volume are the price file's trades for its last hour; pricesAt is
-// that file's own timestamp, so the API never counts the same hour twice.
+// rows = JSON [[itemHrid, listedQty, bestAsk, wantedQty, bestBid, avgPrice, volume, pricesAt, makeCost, made], ...].
+// Prices are -1 when there are no orders or trades. avgPrice and volume are the price file's trades for its last hour;
+// pricesAt is that file's own timestamp, so the API never counts the same hour twice. makeCost and made: see makeCost.
 async function saveMarket(env, at) {
   const prices = await fetch('https://www.milkywayidle.com/game_data/marketplace.json').then(r => r.json());
   const items = Object.entries(prices.marketData)
@@ -106,16 +109,37 @@ async function saveMarket(env, at) {
     .map(([hrid]) => hrid);
   const requests = items.map(itemHrid => ({ type: 'get_market_item_order_books', getMarketItemOrderBooksData: { itemHrid } }));
   const sum = orders => (orders ?? []).reduce((n, o) => n + o.quantity, 0);
+  const ask = hrid => (prices.marketData[hrid]?.['0']?.a > 0 ? prices.marketData[hrid]['0'].a : Infinity);
   const rows = await askGame(env, requests, ['market_item_order_books_updated'], msg => {
     const { asks, bids } = msg.marketItemOrderBooks.orderBooks[0] ?? {}; // index = enhancement level
     const item = msg.marketItemOrderBooks.itemHrid, traded = prices.marketData[item]?.['0'] ?? {};
-    return [item, sum(asks), asks?.[0]?.price ?? -1, sum(bids), bids?.[0]?.price ?? -1, traded.p ?? -1, traded.v ?? 0, prices.timestamp];
+    const make = makeCost(item, ask);
+    return [item, sum(asks), asks?.[0]?.price ?? -1, sum(bids), bids?.[0]?.price ?? -1, traded.p ?? -1, traded.v ?? 0, prices.timestamp,
+      make.cost < Infinity ? Math.round(make.cost) : -1, make.made];
   }, MARKET_MINUTES * 60_000 - 5000, MARKET_PACE_MS);
   await env.DB.batch([
     env.DB.prepare(`INSERT OR REPLACE INTO market (fetched_at, rows) VALUES (?, ?)`).bind(at, JSON.stringify(rows)),
     env.DB.prepare(`DELETE FROM market WHERE fetched_at < ?`).bind(new Date(Date.now() - RETENTION_DAYS * 86400_000).toISOString()),
   ]);
   return `Saved market for ${rows.length} of ${items.length} items`;
+}
+
+// The cost of crafting one item: each input (and the upgrade item) is bought at ask(hrid), or crafted from bought
+// inputs when that's cheaper (one level only, as deeper crafting trades hours of work for coins). made lists the
+// inputs crafted. Resolves { cost: Infinity, made: [] } for items with no recipe.
+export function makeCost(item, ask, depth = 1) {
+  const recipe = recipes[item];
+  if (!recipe) return { cost: Infinity, made: [] };
+  const [outputs, upgrade, ...inputs] = recipe;
+  const made = [];
+  const cheapest = hrid => {
+    const craft = depth > 0 ? makeCost(hrid, ask, depth - 1).cost : Infinity;
+    if (craft < ask(hrid)) made.push(hrid);
+    return Math.min(ask(hrid), craft);
+  };
+  let cost = upgrade ? cheapest(upgrade) : 0;
+  for (let i = 0; i < inputs.length; i += 2) cost += ARTISAN * inputs[i + 1] * cheapest(inputs[i]);
+  return { cost: cost / outputs, made };
 }
 
 async function save(db, boards, at) {

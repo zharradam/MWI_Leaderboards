@@ -114,7 +114,7 @@ async function market(db) {
 }
 
 // Each snapshot: { fetched_at, rows: JSON [[itemHrid, listedQty, bestAsk, wantedQty, bestBid, avgPrice, volume,
-// pricesAt], ...] } or undefined; recent holds the last 24 hours of them. Changes are null when the older snapshot is
+// pricesAt, makeCost, made], ...] } or undefined; recent holds the last 24 hours of them. Changes are null when the older snapshot is
 // missing or didn't list the item. traded is null until a snapshot carries volume (older rows have only five fields);
 // each price-file hour (pricesAt) counts once, as hourly runs can read the same file twice.
 export function computeMarket(latest, dayAgo, weekAgo, recent = []) {
@@ -137,11 +137,11 @@ export function computeMarket(latest, dayAgo, weekAgo, recent = []) {
 
   return {
     latest: latest.fetched_at,
-    items: JSON.parse(latest.rows).map(([item, listed, ask, wanted, bid]) => {
+    items: JSON.parse(latest.rows).map(([item, listed, ask, wanted, bid, , , , makeCost = null, made = []]) => {
       const t = trades.get(item);
       return {
         item, listed, ask, wanted, bid, day: change(day, item, listed), week: change(week, item, listed),
-        traded: t ? t.volume : null, avgPrice: t?.volume ? Math.round(t.value / t.volume) : null,
+        traded: t ? t.volume : null, avgPrice: t?.volume ? Math.round(t.value / t.volume) : null, makeCost, made,
       };
     }),
   };

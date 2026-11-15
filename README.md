@@ -2,7 +2,8 @@
 
 Tracks XP gained per player on Milky Way Idle leaderboards and charts it. Everything runs on Cloudflare's free plan.
 A Market tab lists the +0 order books of items trading at 50M or more, read once an hour at half past, to show what
-people are crafting for XP.
+people are crafting for XP, with each item's cost to make. Recipes come from the game in `scraper/recipes.json`;
+after a game update, refresh them with `node scraper/update-recipes.mjs` (uses `scraper/.dev.vars`) and redeploy the scraper.
 
 ```
 Cloudflare Worker (cron, 1 min)           Cloudflare Pages (pages.dev)
