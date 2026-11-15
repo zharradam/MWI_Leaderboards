@@ -101,26 +101,48 @@ export function computeXp(snapshots, maxGapMs = MIN_GAP_MS) {
   };
 }
 
-// Latest +0 order book totals for expensive items, with how the listed quantity changed over 24 hours and 7 days.
+// Latest +0 order book totals for expensive items, with how the listed quantity changed over 24 hours and 7 days,
+// and what traded over the last 24 hours.
 async function market(db) {
   const at = days => new Date(Date.now() - days * 86400_000).toISOString();
   const before = `SELECT fetched_at, rows FROM market WHERE fetched_at <= ? ORDER BY fetched_at DESC LIMIT 1`;
-  const [latest, day, week] = await db.batch([
+  const [latest, day, week, recent] = await db.batch([
     db.prepare(before).bind(at(0)), db.prepare(before).bind(at(1)), db.prepare(before).bind(at(7)),
+    db.prepare(`SELECT rows FROM market WHERE fetched_at > ?`).bind(at(1)),
   ]);
-  return computeMarket(latest.results[0], day.results[0], week.results[0]);
+  return computeMarket(latest.results[0], day.results[0], week.results[0], recent.results);
 }
 
-// Each snapshot: { fetched_at, rows: JSON [[itemHrid, listedQty, bestAsk, wantedQty, bestBid], ...] } or undefined.
-// Changes are null when the older snapshot is missing or didn't list the item.
-export function computeMarket(latest, dayAgo, weekAgo) {
+// Each snapshot: { fetched_at, rows: JSON [[itemHrid, listedQty, bestAsk, wantedQty, bestBid, avgPrice, volume,
+// pricesAt], ...] } or undefined; recent holds the last 24 hours of them. Changes are null when the older snapshot is
+// missing or didn't list the item. traded is null until a snapshot carries volume (older rows have only five fields);
+// each price-file hour (pricesAt) counts once, as hourly runs can read the same file twice.
+export function computeMarket(latest, dayAgo, weekAgo, recent = []) {
   if (!latest) return { latest: null, items: [] };
   const listed = snap => new Map(snap ? JSON.parse(snap.rows).map(r => [r[0], r[1]]) : []);
   const day = listed(dayAgo), week = listed(weekAgo);
   const change = (then, item, qty) => (then.has(item) ? qty - then.get(item) : null);
+
+  const trades = new Map(); // item -> { hours: Set of pricesAt, volume, value }
+  for (const snap of recent) {
+    for (const [item, , , , , avgPrice, volume, pricesAt] of JSON.parse(snap.rows)) {
+      if (pricesAt == null) continue;
+      if (!trades.has(item)) trades.set(item, { hours: new Set(), volume: 0, value: 0 });
+      const t = trades.get(item);
+      if (t.hours.has(pricesAt)) continue;
+      t.hours.add(pricesAt);
+      if (volume > 0 && avgPrice > 0) { t.volume += volume; t.value += volume * avgPrice; }
+    }
+  }
+
   return {
     latest: latest.fetched_at,
-    items: JSON.parse(latest.rows).map(([item, listed, ask, wanted, bid]) =>
-      ({ item, listed, ask, wanted, bid, day: change(day, item, listed), week: change(week, item, listed) })),
+    items: JSON.parse(latest.rows).map(([item, listed, ask, wanted, bid]) => {
+      const t = trades.get(item);
+      return {
+        item, listed, ask, wanted, bid, day: change(day, item, listed), week: change(week, item, listed),
+        traded: t ? t.volume : null, avgPrice: t?.volume ? Math.round(t.value / t.volume) : null,
+      };
+    }),
   };
 }

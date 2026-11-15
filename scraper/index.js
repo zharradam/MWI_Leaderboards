@@ -96,7 +96,9 @@ async function askGame(env, requests, replyTypes, onReply, timeoutMs, paceMs) {
 }
 
 // Lists the +0 order book of every item trading at MARKET_MIN_PRICE or more, as one row per run:
-// rows = JSON [[itemHrid, listedQty, bestAsk, wantedQty, bestBid], ...]. Prices are -1 when there are no orders.
+// rows = JSON [[itemHrid, listedQty, bestAsk, wantedQty, bestBid, avgPrice, volume, pricesAt], ...]. Prices are -1
+// when there are no orders or trades. avgPrice and volume are the price file's trades for its last hour; pricesAt is
+// that file's own timestamp, so the API never counts the same hour twice.
 async function saveMarket(env, at) {
   const prices = await fetch('https://www.milkywayidle.com/game_data/marketplace.json').then(r => r.json());
   const items = Object.entries(prices.marketData)
@@ -106,7 +108,8 @@ async function saveMarket(env, at) {
   const sum = orders => (orders ?? []).reduce((n, o) => n + o.quantity, 0);
   const rows = await askGame(env, requests, ['market_item_order_books_updated'], msg => {
     const { asks, bids } = msg.marketItemOrderBooks.orderBooks[0] ?? {}; // index = enhancement level
-    return [msg.marketItemOrderBooks.itemHrid, sum(asks), asks?.[0]?.price ?? -1, sum(bids), bids?.[0]?.price ?? -1];
+    const item = msg.marketItemOrderBooks.itemHrid, traded = prices.marketData[item]?.['0'] ?? {};
+    return [item, sum(asks), asks?.[0]?.price ?? -1, sum(bids), bids?.[0]?.price ?? -1, traded.p ?? -1, traded.v ?? 0, prices.timestamp];
   }, MARKET_MINUTES * 60_000 - 5000, MARKET_PACE_MS);
   await env.DB.batch([
     env.DB.prepare(`INSERT OR REPLACE INTO market (fetched_at, rows) VALUES (?, ?)`).bind(at, JSON.stringify(rows)),
