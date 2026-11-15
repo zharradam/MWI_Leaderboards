@@ -159,7 +159,7 @@
         .market { display: grid; gap: 12px; padding: 14px 20px 24px; }
         .market-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; color: var(--ink-soft); }
         .table-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r); }
-        #marketTable { width: 100%; min-inline-size: 1130px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+        #marketTable { width: 100%; min-inline-size: 1250px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
         #marketTable caption { padding: 10px 12px; text-align: left; font-weight: 600; }
         #marketTable th, #marketTable td { padding: 7px 12px; text-align: right; border-top: 1px solid var(--rule); white-space: nowrap; }
         #marketTable :is(th, td):first-child { text-align: left; }
@@ -271,7 +271,7 @@
       <div id="market-panel" role="tabpanel" aria-labelledby="marketTab" hidden>
         <div class="market">
             <div class="market-head">
-                <p>What's listed for sale at +0, for items trading at 50M or more. Listings that climb usually mean people are crafting that item for XP. Traded 24h and a narrow spread show how easily an item sells. Cost to make buys every input at the best ask, with Artisan Tea and a Guzzling Pouch, or crafts an input when that's cheaper (hover to see which). Profit sells at the best ask, less the market's 4% fee.</p>
+                <p>What's listed for sale at +0, for items trading at 50M or more. Listings that climb usually mean people are crafting that item for XP. Traded 24h and a narrow spread show how easily an item sells. Cost to make buys every input at the best ask, with Artisan Tea and a Guzzling Pouch, or crafts an input when that's cheaper (hover to see which). Profit lists at the best ask and Instant profit sells to the best bid, both less the market's 4% fee.</p>
                 <span id="marketTime"></span>
             </div>
             <div class="table-scroll" role="region" aria-labelledby="marketCaption" tabindex="0">
@@ -288,6 +288,7 @@
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Best ask</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Cost to make</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Profit</button></th>
+                            <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Instant profit</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Wanted</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Best bid</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Spread</button></th>
@@ -696,10 +697,11 @@
                 td.title = i.made.length ? `Cheaper to make: ${i.made.map(h => pretty(h.split('/').pop())).join(', ')}` : 'All inputs bought';
                 return td;
             };
-            // Profit: selling at the best ask, less the market's 4% fee, minus the cost to make.
-            const profitCell = i => {
-                if (i.makeCost === null || i.makeCost < 0 || i.ask < 0) return cell('–', -Infinity, 'faint');
-                const p = i.ask * (1 - SELL_FEE) - i.makeCost;
+            // Profit: selling at sellPrice (the best ask, or the best bid for an instant sale), less the market's 4% fee,
+            // minus the cost to make.
+            const profitCell = (i, sellPrice) => {
+                if (i.makeCost === null || i.makeCost < 0 || sellPrice < 0) return cell('–', -Infinity, 'faint');
+                const p = sellPrice * (1 - SELL_FEE) - i.makeCost;
                 return cell(signedCompact.format(p), p, p > 0 ? 'up' : 'down');
             };
             marketBody.replaceChildren(...m.items.map(i => {
@@ -711,7 +713,7 @@
                 tr.append(name, cell(full.format(i.listed), i.listed), change(i.day), change(i.week),
                     i.traded === null ? cell('–', -Infinity, 'faint') : cell(full.format(i.traded), i.traded, i.traded ? '' : 'faint'),
                     i.avgPrice === null ? cell('–', -Infinity, 'faint') : cell(compact.format(i.avgPrice), i.avgPrice),
-                    price(i.ask), makeCell(i), profitCell(i), cell(full.format(i.wanted), i.wanted), price(i.bid),
+                    price(i.ask), makeCell(i), profitCell(i, i.ask), profitCell(i, i.bid), cell(full.format(i.wanted), i.wanted), price(i.bid),
                     spread === null ? cell('–', Infinity, 'faint') : cell(percent.format(spread), spread));
                 return tr;
             }));
