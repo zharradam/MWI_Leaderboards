@@ -47,4 +47,9 @@ test('make cost buys inputs at the ask, or crafts one from bought inputs when ch
   assert.equal(Math.round(cost), Math.round(relic + 0.89 * (10 * 5e6 + 5 * 3e6 + 10 * 40e3 + 100 * 40e3 + 100 * 30e3)));
   assert.deepEqual(made, ['/items/watchful_relic']);
   assert.equal(makeCost('/items/no_recipe', ask).cost, Infinity);
+  // Marksman Bracers: 10 Sighted Bracers (1 glass each) may be crafted, but 30 Umbral Bracers (72 leather each) are
+  // always bought, however cheap to craft.
+  const bracers = { '/items/marksman_brooch': 5e6, '/items/umbral_bracers': 0.5e6, '/items/sighted_bracers': 2.2e6,
+    '/items/beast_bracers': 1, '/items/umbral_leather': 1, '/items/magnifying_glass': 1 };
+  assert.deepEqual(makeCost('/items/marksman_bracers', h => bracers[h] ?? Infinity).made, ['/items/sighted_bracers']);
 });

@@ -24,6 +24,9 @@ const MARKET_MINUTE = 30; // once an hour this run reads market order books inst
 const MARKET_MINUTES = 3; // it takes up to this long (about a second per item), so the runs after it do nothing
 const MARKET_MIN_PRICE = 50_000_000; // only +0 items whose best ask or bid is at least this
 const ARTISAN = 1 - 0.1 * 1.1; // Artisan Tea's 10% fewer inputs, 10% better with a Guzzling Pouch; not the upgrade item
+// An input is only crafted when that takes at most this many of any one material (count needed x its recipe's count):
+// 10 Sighted Bracers (1 Magnifying Glass each) or a Watchful Relic (100s) yes, 30 Umbral Bracers (72 leather each) no.
+const MAKE_MAX_MATERIAL = 500;
 
 export default {
   async scheduled(event, env) {
@@ -125,20 +128,23 @@ async function saveMarket(env, at) {
 }
 
 // The cost of crafting one item: each input (and the upgrade item) is bought at ask(hrid), or crafted from bought
-// inputs when that's cheaper (one level only, as deeper crafting trades hours of work for coins). made lists the
-// inputs crafted. Resolves { cost: Infinity, made: [] } for items with no recipe.
+// inputs when that's cheaper and quick (MAKE_MAX_MATERIAL; one level only, as deeper or bulk crafting trades hours of
+// work for coins). made lists the inputs crafted.
+// Resolves { cost: Infinity, made: [] } for items with no recipe.
 export function makeCost(item, ask, depth = 1) {
   const recipe = recipes[item];
   if (!recipe) return { cost: Infinity, made: [] };
   const [outputs, upgrade, ...inputs] = recipe;
   const made = [];
-  const cheapest = hrid => {
-    const craft = depth > 0 ? makeCost(hrid, ask, depth - 1).cost : Infinity;
+  const cheapest = (hrid, count) => {
+    const counts = recipes[hrid]?.filter((_, k) => k > 2 && k % 2 === 1) ?? [];
+    const quick = count * Math.max(0, ...counts) <= MAKE_MAX_MATERIAL;
+    const craft = depth > 0 && quick ? makeCost(hrid, ask, depth - 1).cost : Infinity;
     if (craft < ask(hrid)) made.push(hrid);
     return Math.min(ask(hrid), craft);
   };
-  let cost = upgrade ? cheapest(upgrade) : 0;
-  for (let i = 0; i < inputs.length; i += 2) cost += ARTISAN * inputs[i + 1] * cheapest(inputs[i]);
+  let cost = upgrade ? cheapest(upgrade, 1) : 0;
+  for (let i = 0; i < inputs.length; i += 2) cost += ARTISAN * inputs[i + 1] * cheapest(inputs[i], inputs[i + 1]);
   return { cost: cost / outputs, made };
 }
 
