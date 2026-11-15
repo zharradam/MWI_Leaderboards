@@ -271,7 +271,7 @@
       <div id="market-panel" role="tabpanel" aria-labelledby="marketTab" hidden>
         <div class="market">
             <div class="market-head">
-                <p>What's listed for sale at +0, for items trading at 50M or more. Listings that climb usually mean people are crafting that item for XP. Traded 24h and a narrow spread show how easily an item sells. Cost to make buys every input at the best ask, with Artisan Tea and a Guzzling Pouch, or crafts an input when that's cheaper (hover to see which). Profit lists at the best ask and Instant profit sells to the best bid, both less the market's 4% fee.</p>
+                <p>What's listed for sale at +0, for items trading at 50M or more. Listings that climb usually mean people are crafting that item for XP. Traded 24h and a narrow spread show how easily an item sells. Break even is the cost to make, buying every input at the best ask with Artisan Tea and a Guzzling Pouch, or crafting an input when that's cheaper (hover to see which), plus the market's 4% fee on selling it. Profit lists at the best ask and Instant profit sells to the best bid.</p>
                 <span id="marketTime"></span>
             </div>
             <div class="table-scroll" role="region" aria-labelledby="marketCaption" tabindex="0">
@@ -286,7 +286,7 @@
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Traded 24h</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Avg price 24h</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Best ask</button></th>
-                            <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Cost to make</button></th>
+                            <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Break even</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Profit</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Instant profit</button></th>
                             <th scope="col" data-type="number"><button type="button" commandfor="marketTable" command="--sort">Wanted</button></th>
@@ -690,18 +690,19 @@
             const price = p => (p < 0 ? cell('none', -1, 'faint') : cell(compact.format(p), p));
             // Unknown changes sort below every real one.
             const change = c => (c === null ? cell('–', -Infinity, 'faint') : cell(signed.format(c), c, c > 0 ? 'up' : c < 0 ? 'down' : ''));
-            // Cost to make: inputs bought at the ask, or crafted from bought inputs when cheaper (made, in the tooltip).
+            // Break even: the cost to make, with inputs bought at the ask, or crafted from bought inputs when cheaper (made, in the tooltip),
+            // plus the market's 4% fee on selling it: the price it breaks even at.
+            const breakEven = i => (i.makeCost === null || i.makeCost < 0 ? null : i.makeCost / (1 - SELL_FEE));
             const makeCell = i => {
-                if (i.makeCost === null || i.makeCost < 0) return cell('–', Infinity, 'faint');
-                const td = cell(compact.format(i.makeCost), i.makeCost);
+                if (breakEven(i) === null) return cell('–', Infinity, 'faint');
+                const td = cell(compact.format(breakEven(i)), breakEven(i));
                 td.title = i.made.length ? `Cheaper to make: ${i.made.map(h => pretty(h.split('/').pop())).join(', ')}` : 'All inputs bought';
                 return td;
             };
-            // Profit: selling at sellPrice (the best ask, or the best bid for an instant sale), less the market's 4% fee,
-            // minus the cost to make.
+            // Profit: selling at sellPrice (the best ask, or the best bid for an instant sale) minus the break-even price.
             const profitCell = (i, sellPrice) => {
-                if (i.makeCost === null || i.makeCost < 0 || sellPrice < 0) return cell('–', -Infinity, 'faint');
-                const p = sellPrice * (1 - SELL_FEE) - i.makeCost;
+                if (breakEven(i) === null || sellPrice < 0) return cell('–', -Infinity, 'faint');
+                const p = sellPrice - breakEven(i);
                 return cell(signedCompact.format(p), p, p > 0 ? 'up' : 'down');
             };
             marketBody.replaceChildren(...m.items.map(i => {
