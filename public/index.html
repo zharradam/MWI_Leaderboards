@@ -91,7 +91,8 @@
         main { display: grid; min-height: 0; }
         #xp-panel { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 
-        #chart-area { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 14px; min-width: 0; min-height: 0; padding: 14px 16px 10px 20px; }
+        /* minmax(0, 1fr): an auto column would grow to the canvas's old width, so the chart could never shrink. */
+        #chart-area { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 14px; min-width: 0; min-height: 0; padding: 14px 16px 10px 20px; }
         .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
         #viewPicker { margin-left: auto; }
         /* Feed freshness: green when recent, amber when a run or two was missed, red when the feed looks broken. */
